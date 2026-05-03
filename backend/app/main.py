@@ -260,9 +260,16 @@ async def upload_client_config(request: Request):
     return {"status": "saved"}
 
 
+def _get_redirect_uri(request: Request) -> str:
+    uri = str(request.url_for("google_auth_callback"))
+    if uri.startswith("http://") and "localhost" not in uri:
+        uri = "https://" + uri[len("http://"):]
+    return uri
+
+
 @app.get("/api/auth/google")
 def google_auth_redirect(request: Request):
-    redirect_uri = str(request.url_for("google_auth_callback"))
+    redirect_uri = _get_redirect_uri(request)
     flow = create_auth_flow(redirect_uri)
     if not flow:
         raise HTTPException(
@@ -277,7 +284,7 @@ def google_auth_redirect(request: Request):
 
 @app.get("/api/auth/google/callback")
 def google_auth_callback(code: str, request: Request):
-    redirect_uri = str(request.url_for("google_auth_callback"))
+    redirect_uri = _get_redirect_uri(request)
     creds = exchange_code(code, redirect_uri)
     if not creds:
         raise HTTPException(status_code=400, detail="Failed to exchange code")
