@@ -8,9 +8,13 @@ When using the API, list items (numbered lists in Google Docs) are
 reconstructed with their numbers so the parser can identify tasks.
 """
 
+import re
+
 import httpx
 
 from app.google_auth import get_credentials
+
+_DATE_RE = re.compile(r"^\s*\d{1,2}\.\d{1,2}\.\d{4}\s*$")
 
 EXPORT_URL = "https://docs.google.com/document/d/{doc_id}/export?format=txt"
 EXPORT_URL_WITH_TAB = (
@@ -59,7 +63,8 @@ def _extract_text_from_body(body: dict, lists: dict | None = None) -> str:
             else:
                 text_parts.append(para_text)
         else:
-            section_counter = 0
+            if _DATE_RE.match(para_text):
+                section_counter = 0
             text_parts.append(para_text)
 
     return "".join(text_parts)
