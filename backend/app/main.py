@@ -270,15 +270,13 @@ def _get_redirect_uri(request: Request) -> str:
 @app.get("/api/auth/google")
 def google_auth_redirect(request: Request):
     redirect_uri = _get_redirect_uri(request)
-    flow = create_auth_flow(redirect_uri)
-    if not flow:
+    result = create_auth_flow(redirect_uri)
+    if not result:
         raise HTTPException(
             status_code=400,
             detail="Google client config not found. Upload it first.",
         )
-    authorization_url, _ = flow.authorization_url(
-        access_type="offline", prompt="consent"
-    )
+    _, authorization_url = result
     return RedirectResponse(authorization_url)
 
 

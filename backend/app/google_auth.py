@@ -20,6 +20,7 @@ _token_path = _credentials_dir / "google_token.json"
 _client_secret_path = _credentials_dir / "client_secret.json"
 
 _cached_creds: Credentials | None = None
+_pending_flow: Flow | None = None
 
 
 def get_client_config() -> dict | None:
@@ -72,23 +73,37 @@ def _save_token(creds: Credentials) -> None:
         f.write(creds.to_json())
 
 
-def create_auth_flow(redirect_uri: str) -> Flow | None:
+def create_auth_flow(redirect_uri: str) -> tuple[Flow, str] | None:
+    global _pending_flow
     config = get_client_config()
     if not config:
         return None
 
-    flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect_uri)
-    return flow
+    flow = Flow.from_client_config(
+        config, scopes=SCOPES, redirect_uri=redirect_uri
+    )
+    authorization_url, state = flow.authorization_url(
+        access_type="offline", prompt="consent"
+    )
+    _pending_flow = flow
+    return flow, authorization_url
 
 
 def exchange_code(code: str, redirect_uri: str) -> Credentials | None:
-    global _cached_creds
-    config = get_client_config()
-    if not config:
-        return None
+    global _cached_creds, _pending_flow
 
-    flow = Flow.from_client_config(config, scopes=SCOPES, redirect_uri=redirect_uri)
-    flow.redirect_uri = redirect_uri
+    if _pending_flow:
+        flow = _pending_flow
+        flow.redirect_uri = redirect_uri
+        _pending_flow = None
+    else:
+        config = get_client_config()
+        if not config:
+            return None
+        flow = Flow.from_client_config(
+            config, scopes=SCOPES, redirect_uri=redirect_uri
+        )
+
     flow.fetch_token(code=code)
 
     creds = flow.credentials
