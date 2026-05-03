@@ -90,6 +90,31 @@ body {
   background: #059669;
 }
 
+.btn-google {
+  background: #4285f4;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+
+.btn-google:hover {
+  background: #3367d6;
+}
+
+.auth-badge {
+  font-size: 12px;
+  background: #10b98133;
+  color: #10b981;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
 /* ============ Metrics Bar ============ */
 .metrics-bar {
   display: grid;

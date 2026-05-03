@@ -55,4 +55,15 @@ export const api = {
 
   syncSource: (id: string) =>
     request<SyncResult>(`/api/sync/${id}`, { method: "POST" }),
+
+  getAuthStatus: () =>
+    request<{ authenticated: boolean; has_client_config: boolean }>("/api/auth/status"),
+
+  uploadClientConfig: (config: object) =>
+    request<{ status: string }>("/api/auth/client-config", {
+      method: "POST",
+      body: JSON.stringify({ config }),
+    }),
+
+  getGoogleAuthUrl: () => `${API_BASE}/api/auth/google`,
 };

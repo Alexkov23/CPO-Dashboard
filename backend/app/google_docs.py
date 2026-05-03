@@ -1,21 +1,95 @@
 """Google Docs fetcher.
 
-Fetches document content via the Google Docs export URL (public/shared docs).
-For public documents, we use the export endpoint that doesn't require API keys.
+Supports two modes:
+1. Google Docs API (when OAuth2 credentials are available) - for private docs
+2. Public export endpoint (fallback) - for publicly shared docs
 """
 
 import httpx
+from googleapiclient.discovery import build
+
+from app.google_auth import get_credentials
 
 EXPORT_URL = "https://docs.google.com/document/d/{doc_id}/export?format=txt"
-EXPORT_URL_WITH_TAB = "https://docs.google.com/document/d/{doc_id}/export?format=txt&tab={tab}"
+EXPORT_URL_WITH_TAB = (
+    "https://docs.google.com/document/d/{doc_id}/export?format=txt&tab={tab}"
+)
+
+
+def _extract_text_from_doc(doc: dict) -> str:
+    """Extract plain text from Google Docs API response body."""
+    text_parts: list[str] = []
+    body = doc.get("body", {})
+    content = body.get("content", [])
+
+    for element in content:
+        paragraph = element.get("paragraph")
+        if not paragraph:
+            continue
+        for pe in paragraph.get("elements", []):
+            text_run = pe.get("textRun")
+            if text_run:
+                text_parts.append(text_run.get("content", ""))
+
+    return "".join(text_parts)
+
+
+def _extract_text_from_tab(tab: dict) -> str:
+    """Extract plain text from a specific tab in the document."""
+    body = tab.get("documentTab", {}).get("body", {})
+    content = body.get("content", [])
+    text_parts: list[str] = []
+
+    for element in content:
+        paragraph = element.get("paragraph")
+        if not paragraph:
+            continue
+        for pe in paragraph.get("elements", []):
+            text_run = pe.get("textRun")
+            if text_run:
+                text_parts.append(text_run.get("content", ""))
+
+    return "".join(text_parts)
 
 
 async def fetch_doc_text(doc_id: str, section: str = "") -> str:
     """Fetch plain text content of a Google Doc.
 
-    Uses the public export endpoint. The document must be shared
-    with "Anyone with the link" permission.
+    Uses Google Docs API if OAuth2 credentials are available,
+    otherwise falls back to public export endpoint.
     """
+    creds = get_credentials()
+
+    if creds:
+        return _fetch_via_api(doc_id, section, creds)
+
+    return await _fetch_via_export(doc_id, section)
+
+
+def _fetch_via_api(doc_id: str, section: str, creds: object) -> str:
+    """Fetch document text using Google Docs API."""
+    service = build("docs", "v1", credentials=creds)
+
+    if section:
+        doc = (
+            service.documents()
+            .get(documentId=doc_id, includeTabsContent=True)
+            .execute()
+        )
+        tabs = doc.get("tabs", [])
+        for tab in tabs:
+            tab_props = tab.get("tabProperties", {})
+            tab_id = tab_props.get("tabId", "")
+            if tab_id == section or section in tab_id:
+                return _extract_text_from_tab(tab)
+        return _extract_text_from_doc(doc)
+    else:
+        doc = service.documents().get(documentId=doc_id).execute()
+        return _extract_text_from_doc(doc)
+
+
+async def _fetch_via_export(doc_id: str, section: str) -> str:
+    """Fetch document text using public export endpoint (fallback)."""
     if section:
         url = EXPORT_URL_WITH_TAB.format(doc_id=doc_id, tab=section)
     else:

@@ -1,11 +1,19 @@
 from contextlib import asynccontextmanager
 from datetime import date, timedelta
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
+from app.google_auth import (
+    create_auth_flow,
+    exchange_code,
+    get_client_config,
+    is_authenticated,
+    save_client_config,
+)
 from app.google_docs import fetch_doc_text
 from app.models import Source, Task
 from app.parser import parse_doc_url, parse_tasks_text
@@ -229,6 +237,54 @@ def get_metrics(
         done_this_week=done_this_week,
         total_tasks=total_tasks,
     )
+
+
+# ---------- Google Auth ----------
+
+
+@app.get("/api/auth/status")
+def auth_status():
+    return {
+        "authenticated": is_authenticated(),
+        "has_client_config": get_client_config() is not None,
+    }
+
+
+@app.post("/api/auth/client-config")
+async def upload_client_config(request: Request):
+    body = await request.json()
+    config = body.get("config")
+    if not config:
+        raise HTTPException(status_code=400, detail="Missing config")
+    save_client_config(config)
+    return {"status": "saved"}
+
+
+@app.get("/api/auth/google")
+def google_auth_redirect(request: Request):
+    redirect_uri = str(request.url_for("google_auth_callback"))
+    flow = create_auth_flow(redirect_uri)
+    if not flow:
+        raise HTTPException(
+            status_code=400,
+            detail="Google client config not found. Upload it first.",
+        )
+    authorization_url, _ = flow.authorization_url(
+        access_type="offline", prompt="consent"
+    )
+    return RedirectResponse(authorization_url)
+
+
+@app.get("/api/auth/google/callback")
+def google_auth_callback(code: str, request: Request):
+    redirect_uri = str(request.url_for("google_auth_callback"))
+    creds = exchange_code(code, redirect_uri)
+    if not creds:
+        raise HTTPException(status_code=400, detail="Failed to exchange code")
+    frontend_url = request.headers.get("referer", "/")
+    if frontend_url == "/":
+        frontend_url = "https://dist-remdpcvf.devinapps.com"
+    return RedirectResponse(frontend_url)
 
 
 # ---------- Health ----------

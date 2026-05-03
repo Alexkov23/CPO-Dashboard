@@ -23,6 +23,10 @@ function App() {
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncingSource, setSyncingSource] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"tasks" | "sources">("tasks");
+  const [googleAuth, setGoogleAuth] = useState<{
+    authenticated: boolean;
+    has_client_config: boolean;
+  } | null>(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -48,6 +52,10 @@ function App() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    api.getAuthStatus().then(setGoogleAuth).catch(() => {});
+  }, []);
 
   const handleAddProject = async (data: SourceCreate) => {
     await api.createSource(data);
@@ -111,6 +119,17 @@ function App() {
           <button className="btn-add" onClick={() => setModalOpen(true)}>
             +
           </button>
+          {googleAuth && !googleAuth.authenticated && googleAuth.has_client_config && (
+            <a
+              href={api.getGoogleAuthUrl()}
+              className="btn-google"
+            >
+              Google Auth
+            </a>
+          )}
+          {googleAuth?.authenticated && (
+            <span className="auth-badge">Google OK</span>
+          )}
         </div>
       </header>
 
