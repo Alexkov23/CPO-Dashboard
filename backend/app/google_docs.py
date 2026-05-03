@@ -3,6 +3,9 @@
 Supports two modes:
 1. Google Docs REST API via httpx (when OAuth2 credentials are available)
 2. Public export endpoint (fallback) - for publicly shared docs
+
+When using the API, list items (numbered lists in Google Docs) are
+reconstructed with their numbers so the parser can identify tasks.
 """
 
 import httpx
@@ -21,19 +24,45 @@ DOCS_API_URL_WITH_TABS = (
 )
 
 
-def _extract_text_from_body(body: dict) -> str:
-    """Extract plain text from a document body."""
+def _extract_text_from_body(body: dict, lists: dict | None = None) -> str:
+    """Extract plain text from a document body.
+
+    For list items, reconstructs numbering from the bullet/lists metadata
+    so the parser can correctly identify task numbers.
+    """
     text_parts: list[str] = []
+    list_counters: dict[str, int] = {}
+
     content = body.get("content", [])
 
     for element in content:
         paragraph = element.get("paragraph")
         if not paragraph:
             continue
+
+        bullet = paragraph.get("bullet")
+        para_text = ""
         for pe in paragraph.get("elements", []):
             text_run = pe.get("textRun")
             if text_run:
-                text_parts.append(text_run.get("content", ""))
+                para_text += text_run.get("content", "")
+
+        if bullet and lists:
+            list_id = bullet.get("listId", "")
+            nesting = bullet.get("nestingLevel", 0)
+
+            if nesting == 0:
+                counter_key = list_id
+                count = list_counters.get(counter_key, 0) + 1
+                list_counters[counter_key] = count
+                text_parts.append(f"{count}. {para_text}")
+            else:
+                text_parts.append(para_text)
+        else:
+            if paragraph.get("bullet") is None:
+                for lid in list(list_counters.keys()):
+                    list_counters[lid] = 0
+            text_parts.append(para_text)
 
     return "".join(text_parts)
 
@@ -68,18 +97,22 @@ async def _fetch_via_api(doc_id: str, section: str, creds: object) -> str:
                 tab_props = tab.get("tabProperties", {})
                 tab_id = tab_props.get("tabId", "")
                 if tab_id == section or section in tab_id:
-                    tab_body = tab.get("documentTab", {}).get("body", {})
-                    return _extract_text_from_body(tab_body)
+                    tab_doc = tab.get("documentTab", {})
+                    tab_body = tab_doc.get("body", {})
+                    tab_lists = tab_doc.get("lists", {})
+                    return _extract_text_from_body(tab_body, tab_lists)
 
-            body = doc.get("body", {})
-            return _extract_text_from_body(body)
+            doc_data = doc.get("body", {})
+            doc_lists = doc.get("lists", {})
+            return _extract_text_from_body(doc_data, doc_lists)
         else:
             url = DOCS_API_URL.format(doc_id=doc_id)
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             doc = response.json()
             body = doc.get("body", {})
-            return _extract_text_from_body(body)
+            lists = doc.get("lists", {})
+            return _extract_text_from_body(body, lists)
 
 
 async def _fetch_via_export(doc_id: str, section: str) -> str:
