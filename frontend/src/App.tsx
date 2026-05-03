@@ -3,6 +3,7 @@ import { api } from "./api/client";
 import { AddProjectModal } from "./components/AddProjectModal";
 import { MetricsBar } from "./components/MetricsBar";
 import { SourceList } from "./components/SourceList";
+import { TaskChart } from "./components/TaskChart";
 import { TaskList } from "./components/TaskList";
 import type {
   DashboardMetrics,
@@ -12,12 +13,15 @@ import type {
 } from "./types";
 import "./App.css";
 
+type StatusFilter = "all" | "done" | "active";
+
 function App() {
   const [sources, setSources] = useState<Source[]>([]);
   const [tasks, setTasks] = useState<TasksGroupedByDate[]>([]);
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -95,20 +99,13 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>CPO Dashboard</h1>
+        <div className="header-left">
+          <h1>CPO Dashboard</h1>
+          {googleAuth?.authenticated && (
+            <span className="auth-badge">Google OK</span>
+          )}
+        </div>
         <div className="header-actions">
-          <select
-            className="project-filter"
-            value={selectedProject}
-            onChange={(e) => setSelectedProject(e.target.value)}
-          >
-            <option value="">Все проекты</option>
-            {projects.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
           <button
             className="btn-sync"
             onClick={handleSyncAll}
@@ -119,21 +116,60 @@ function App() {
           <button className="btn-add" onClick={() => setModalOpen(true)}>
             +
           </button>
-          {googleAuth && !googleAuth.authenticated && googleAuth.has_client_config && (
-            <a
-              href={api.getGoogleAuthUrl()}
-              className="btn-google"
-            >
-              Google Auth
-            </a>
-          )}
-          {googleAuth?.authenticated && (
-            <span className="auth-badge">Google OK</span>
-          )}
+          {googleAuth &&
+            !googleAuth.authenticated &&
+            googleAuth.has_client_config && (
+              <a href={api.getGoogleAuthUrl()} className="btn-google">
+                Google Auth
+              </a>
+            )}
         </div>
       </header>
 
       <MetricsBar metrics={metrics} loading={loading} />
+
+      {!loading && tasks.length > 0 && <TaskChart groups={tasks} />}
+
+      <div className="filters-bar">
+        <div className="project-pills">
+          <button
+            className={`pill ${selectedProject === "" ? "active" : ""}`}
+            onClick={() => setSelectedProject("")}
+          >
+            Все проекты
+          </button>
+          {projects.map((p) => (
+            <button
+              key={p}
+              className={`pill ${selectedProject === p ? "active" : ""}`}
+              onClick={() => setSelectedProject(p)}
+            >
+              {p}
+            </button>
+          ))}
+        </div>
+
+        <div className="status-pills">
+          <button
+            className={`pill ${statusFilter === "all" ? "active" : ""}`}
+            onClick={() => setStatusFilter("all")}
+          >
+            Все
+          </button>
+          <button
+            className={`pill pill-done ${statusFilter === "done" ? "active" : ""}`}
+            onClick={() => setStatusFilter("done")}
+          >
+            Выполнено
+          </button>
+          <button
+            className={`pill pill-active ${statusFilter === "active" ? "active" : ""}`}
+            onClick={() => setStatusFilter("active")}
+          >
+            В работе
+          </button>
+        </div>
+      </div>
 
       <nav className="tab-nav">
         <button
@@ -152,7 +188,11 @@ function App() {
 
       <main className="app-main">
         {activeTab === "tasks" ? (
-          <TaskList groups={tasks} loading={loading} />
+          <TaskList
+            groups={tasks}
+            loading={loading}
+            statusFilter={statusFilter}
+          />
         ) : (
           <SourceList
             sources={sources}

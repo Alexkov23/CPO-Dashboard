@@ -1,8 +1,10 @@
+import { useMemo } from "react";
 import type { TasksGroupedByDate } from "../types";
 
 interface TaskListProps {
   groups: TasksGroupedByDate[];
   loading: boolean;
+  statusFilter: "all" | "done" | "active";
 }
 
 function formatDate(dateStr: string): string {
@@ -15,24 +17,46 @@ function formatDate(dateStr: string): string {
   });
 }
 
-export function TaskList({ groups, loading }: TaskListProps) {
+export function TaskList({ groups, loading, statusFilter }: TaskListProps) {
+  const filtered = useMemo(() => {
+    if (statusFilter === "all") return groups;
+
+    return groups
+      .map((g) => ({
+        ...g,
+        tasks: g.tasks.filter((t) =>
+          statusFilter === "done" ? t.done : !t.done
+        ),
+      }))
+      .filter((g) => g.tasks.length > 0);
+  }, [groups, statusFilter]);
+
   if (loading) {
     return <div className="task-list loading">Загрузка задач...</div>;
   }
 
-  if (groups.length === 0) {
+  if (filtered.length === 0) {
     return (
       <div className="task-list empty">
-        <p>Нет задач. Добавьте проект и синхронизируйте данные.</p>
+        <p>
+          {groups.length === 0
+            ? "Нет задач. Добавьте проект и синхронизируйте данные."
+            : "Нет задач с выбранным фильтром."}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="task-list">
-      {groups.map((group) => (
+      {filtered.map((group) => (
         <div key={group.date} className="task-group">
-          <h3 className="task-group-date">{formatDate(group.date)}</h3>
+          <h3 className="task-group-date">
+            {formatDate(group.date)}
+            <span className="task-group-count">
+              {group.tasks.length}
+            </span>
+          </h3>
           <div className="task-items">
             {group.tasks.map((task) => (
               <div
