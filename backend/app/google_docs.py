@@ -29,9 +29,12 @@ def _extract_text_from_body(body: dict, lists: dict | None = None) -> str:
 
     For list items, reconstructs numbering from the bullet/lists metadata
     so the parser can correctly identify task numbers.
+    Uses a single counter per section (resets on non-list paragraphs)
+    because Google Docs may assign different list_ids to visually
+    continuous numbered lists.
     """
     text_parts: list[str] = []
-    list_counters: dict[str, int] = {}
+    section_counter = 0
 
     content = body.get("content", [])
 
@@ -48,20 +51,15 @@ def _extract_text_from_body(body: dict, lists: dict | None = None) -> str:
                 para_text += text_run.get("content", "")
 
         if bullet and lists:
-            list_id = bullet.get("listId", "")
             nesting = bullet.get("nestingLevel", 0)
 
             if nesting == 0:
-                counter_key = list_id
-                count = list_counters.get(counter_key, 0) + 1
-                list_counters[counter_key] = count
-                text_parts.append(f"{count}. {para_text}")
+                section_counter += 1
+                text_parts.append(f"{section_counter}. {para_text}")
             else:
                 text_parts.append(para_text)
         else:
-            if paragraph.get("bullet") is None:
-                for lid in list(list_counters.keys()):
-                    list_counters[lid] = 0
+            section_counter = 0
             text_parts.append(para_text)
 
     return "".join(text_parts)
