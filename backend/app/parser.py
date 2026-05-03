@@ -33,7 +33,7 @@ class ParsedTask:
 
 
 DATE_PATTERN = re.compile(r"^(\d{1,2})\.(\d{1,2})\.(\d{4})\s*$")
-TASK_PATTERN = re.compile(r"^(\d+)\.\s*(\+)?\s*(.+)$")
+TASK_PATTERN = re.compile(r"^(\d+)\.\s*(\+)?\s*(.*)$")
 
 
 def parse_doc_url(url: str) -> tuple[str, str]:
