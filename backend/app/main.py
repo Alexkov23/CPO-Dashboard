@@ -1,0 +1,239 @@
+from contextlib import asynccontextmanager
+from datetime import date, timedelta
+
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+
+from app.database import Base, engine, get_db
+from app.google_docs import fetch_doc_text
+from app.models import Source, Task
+from app.parser import parse_doc_url, parse_tasks_text
+from app.schemas import (
+    DashboardMetrics,
+    SourceCreate,
+    SourceResponse,
+    SourceToggle,
+    SyncResult,
+    TaskResponse,
+    TasksGroupedByDate,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="CPO Dashboard API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---------- Sources ----------
+
+
+@app.get("/api/sources", response_model=list[SourceResponse])
+def list_sources(db: Session = Depends(get_db)):
+    return db.query(Source).order_by(Source.created_at.desc()).all()
+
+
+@app.post("/api/sources", response_model=SourceResponse, status_code=201)
+def create_source(payload: SourceCreate, db: Session = Depends(get_db)):
+    try:
+        doc_id, section = parse_doc_url(payload.doc_url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    source = Source(
+        name=payload.name,
+        project=payload.project,
+        doc_id=doc_id,
+        section=section,
+    )
+    db.add(source)
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+@app.patch("/api/sources/{source_id}", response_model=SourceResponse)
+def toggle_source(source_id: str, payload: SourceToggle, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    source.enabled = payload.enabled
+    db.commit()
+    db.refresh(source)
+    return source
+
+
+@app.delete("/api/sources/{source_id}", status_code=204)
+def delete_source(source_id: str, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    db.delete(source)
+    db.commit()
+
+
+# ---------- Sync ----------
+
+
+@app.post("/api/sync", response_model=list[SyncResult])
+async def sync_all(db: Session = Depends(get_db)):
+    sources = db.query(Source).filter(Source.enabled.is_(True)).all()
+    results: list[SyncResult] = []
+
+    for source in sources:
+        result = await _sync_source(source, db)
+        results.append(result)
+
+    return results
+
+
+@app.post("/api/sync/{source_id}", response_model=SyncResult)
+async def sync_source(source_id: str, db: Session = Depends(get_db)):
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    return await _sync_source(source, db)
+
+
+async def _sync_source(source: Source, db: Session) -> SyncResult:
+    errors: list[str] = []
+    tasks_new = 0
+    tasks_updated = 0
+
+    try:
+        text = await fetch_doc_text(source.doc_id, source.section)
+    except Exception as exc:
+        return SyncResult(
+            source_id=source.id,
+            project=source.project,
+            tasks_found=0,
+            tasks_new=0,
+            tasks_updated=0,
+            errors=[f"Failed to fetch doc: {exc}"],
+        )
+
+    parsed = parse_tasks_text(text)
+
+    for pt in parsed:
+        existing = (
+            db.query(Task)
+            .filter(
+                Task.source_id == source.id,
+                Task.task_date == pt.task_date,
+                Task.number == pt.number,
+            )
+            .first()
+        )
+
+        if existing:
+            if existing.title != pt.title or existing.done != pt.done:
+                existing.title = pt.title
+                existing.done = pt.done
+                existing.status = pt.status
+                tasks_updated += 1
+        else:
+            task = Task(
+                source_id=source.id,
+                project=source.project,
+                task_date=pt.task_date,
+                number=pt.number,
+                title=pt.title,
+                done=pt.done,
+                status=pt.status,
+            )
+            db.add(task)
+            tasks_new += 1
+
+    db.commit()
+
+    return SyncResult(
+        source_id=source.id,
+        project=source.project,
+        tasks_found=len(parsed),
+        tasks_new=tasks_new,
+        tasks_updated=tasks_updated,
+        errors=errors,
+    )
+
+
+# ---------- Tasks ----------
+
+
+@app.get("/api/tasks", response_model=list[TasksGroupedByDate])
+def list_tasks(
+    project: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Task)
+    if project:
+        query = query.filter(Task.project == project)
+
+    tasks = query.order_by(Task.task_date.desc(), Task.number.asc()).all()
+
+    grouped: dict[date, list[TaskResponse]] = {}
+    for t in tasks:
+        task_resp = TaskResponse.model_validate(t)
+        grouped.setdefault(t.task_date, []).append(task_resp)
+
+    return [
+        TasksGroupedByDate(date=d, tasks=task_list)
+        for d, task_list in sorted(grouped.items(), key=lambda x: x[0], reverse=True)
+    ]
+
+
+@app.get("/api/projects", response_model=list[str])
+def list_projects(db: Session = Depends(get_db)):
+    rows = db.query(Source.project).distinct().all()
+    return [r[0] for r in rows]
+
+
+# ---------- Metrics ----------
+
+
+@app.get("/api/metrics", response_model=DashboardMetrics)
+def get_metrics(
+    project: str | None = None,
+    db: Session = Depends(get_db),
+):
+    query = db.query(Task)
+    if project:
+        query = query.filter(Task.project == project)
+
+    total_done = query.filter(Task.done.is_(True)).count()
+    total_active = query.filter(Task.done.is_(False)).count()
+
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+
+    done_today = query.filter(Task.done.is_(True), Task.task_date == today).count()
+    done_this_week = query.filter(Task.done.is_(True), Task.task_date >= week_ago).count()
+
+    total_tasks = query.count()
+
+    return DashboardMetrics(
+        total_done=total_done,
+        total_active=total_active,
+        done_today=done_today,
+        done_this_week=done_this_week,
+        total_tasks=total_tasks,
+    )
+
+
+# ---------- Health ----------
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
