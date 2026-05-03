@@ -42,26 +42,27 @@ export function TaskChart({ groups }: TaskChartProps) {
       <h3 className="chart-title">Задачи по датам</h3>
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={data} barGap={0} barCategoryGap="20%">
-          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a3a" />
+          <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
           <XAxis
             dataKey="date"
-            tick={{ fill: "#888", fontSize: 11 }}
-            axisLine={{ stroke: "#2a2a3a" }}
+            tick={{ fill: "#6b7280", fontSize: 11 }}
+            axisLine={{ stroke: "#e5e7eb" }}
             tickLine={false}
           />
           <YAxis
-            tick={{ fill: "#888", fontSize: 11 }}
+            tick={{ fill: "#6b7280", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
             width={30}
           />
           <Tooltip
             contentStyle={{
-              background: "#1a1a24",
-              border: "1px solid #2a2a3a",
+              background: "#fff",
+              border: "1px solid #e5e7eb",
               borderRadius: "8px",
-              color: "#e0e0e8",
+              color: "#1a1a2e",
               fontSize: 13,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
             }}
           />
           <Bar
@@ -74,7 +75,7 @@ export function TaskChart({ groups }: TaskChartProps) {
           <Bar
             dataKey="active"
             name="Активных"
-            fill="#6b7280"
+            fill="#d1d5db"
             radius={[4, 4, 0, 0]}
             stackId="tasks"
           />
