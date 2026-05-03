@@ -117,8 +117,6 @@ async def sync_source(source_id: str, db: Session = Depends(get_db)):
 
 async def _sync_source(source: Source, db: Session) -> SyncResult:
     errors: list[str] = []
-    tasks_new = 0
-    tasks_updated = 0
 
     try:
         text = await fetch_doc_text(source.doc_id, source.section)
@@ -134,35 +132,19 @@ async def _sync_source(source: Source, db: Session) -> SyncResult:
 
     parsed = parse_tasks_text(text)
 
-    for pt in parsed:
-        existing = (
-            db.query(Task)
-            .filter(
-                Task.source_id == source.id,
-                Task.task_date == pt.task_date,
-                Task.number == pt.number,
-            )
-            .first()
-        )
+    db.query(Task).filter(Task.source_id == source.id).delete()
 
-        if existing:
-            if existing.title != pt.title or existing.done != pt.done:
-                existing.title = pt.title
-                existing.done = pt.done
-                existing.status = pt.status
-                tasks_updated += 1
-        else:
-            task = Task(
-                source_id=source.id,
-                project=source.project,
-                task_date=pt.task_date,
-                number=pt.number,
-                title=pt.title,
-                done=pt.done,
-                status=pt.status,
-            )
-            db.add(task)
-            tasks_new += 1
+    for pt in parsed:
+        task = Task(
+            source_id=source.id,
+            project=source.project,
+            task_date=pt.task_date,
+            number=pt.number,
+            title=pt.title,
+            done=pt.done,
+            status=pt.status,
+        )
+        db.add(task)
 
     db.commit()
 
@@ -170,8 +152,8 @@ async def _sync_source(source: Source, db: Session) -> SyncResult:
         source_id=source.id,
         project=source.project,
         tasks_found=len(parsed),
-        tasks_new=tasks_new,
-        tasks_updated=tasks_updated,
+        tasks_new=len(parsed),
+        tasks_updated=0,
         errors=errors,
     )
 
